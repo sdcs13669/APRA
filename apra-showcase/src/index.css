@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-background: #F8FAFC;
+  --color-foreground: #1E293B;
+  --color-primary: #2563EB;
+  --color-secondary: #3B82F6;
+  --color-accent: #F97316;
+  --color-muted: #FFFFFF;
+  --color-border: #E2E8F0;
+  --chart-line-1: #2563EB;
+  --chart-line-2: #8B5CF6;
+  --chart-line-3: #16A34A;
+  --chart-line-4: #DC2626;
+  --chart-line-5: #F59E0B;
+  --chart-line-6: #EC4899;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Source Sans 3', sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
