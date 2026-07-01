@@ -18,7 +18,7 @@ export function useAccuracyData(defense: DefenseMethod, attack: AttackMethod) {
       .then((text) => {
         const raw = parseCsv<Record<string, string>>(text);
         const parsed: AccuracyRow[] = raw.map((row) => ({
-          epoch: Number(row.epoch ?? row.Epoch ?? 0),
+          epoch: Number(row.epoch ?? row.Epoch ?? row[""] ?? 0),
           test_acc: Number(row.main ?? row.test_acc ?? row["test acc"] ?? 0),
           bkd_acc: Number(row.backdoor ?? row.bkd_acc ?? row["bkd acc"] ?? 0),
           test_loss: Number(row.test_loss ?? row["test loss"] ?? 0),

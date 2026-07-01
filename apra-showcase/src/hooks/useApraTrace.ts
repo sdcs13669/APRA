@@ -1,17 +1,17 @@
 import { useState, useEffect } from "react";
-import type { ApraClientTraceRow, ApraRoundSummaryRow, ReplayFrame } from "../types";
+import type { ApraClientTraceRow, ApraRoundSummaryRow, ReplayFrame, AttackMethod } from "../types";
 import { getTracePath, getRoundSummaryPath } from "../lib/data-paths";
 import { parseCsv } from "../lib/csv";
 
-export function useApraTrace() {
+export function useApraTrace(attack?: AttackMethod) {
   const [frames, setFrames] = useState<ReplayFrame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
-      fetch(getTracePath()).then((r) => r.text()),
-      fetch(getRoundSummaryPath()).then((r) => r.text()),
+      fetch(getTracePath(attack)).then((r) => r.text()),
+      fetch(getRoundSummaryPath(attack)).then((r) => r.text()),
     ])
       .then(([traceText, summaryText]) => {
         const rawTraces = parseCsv<Record<string, string>>(traceText);
@@ -76,7 +76,7 @@ export function useApraTrace() {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [attack]);
 
   return { frames, loading, error };
 }

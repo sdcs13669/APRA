@@ -1,54 +1,62 @@
 """
 Prepare experiment data for the APRA showcase website.
 
-Reads raw experiment results from ../../main/re_result_APRA/ and
+Reads raw experiment results from ../../main/re_result_6-29_APRA/ and
 generates cleaned CSV files + summary.json in public/data/.
 """
 import csv
 import json
-import os
 import shutil
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-RESULT_DIR = BASE_DIR.parent / "main" / "re_result_APRA"
+RESULT_DIR = BASE_DIR.parent / "main" / "re_result_6-29_APRA"
 PUBLIC_DATA = BASE_DIR / "public" / "data"
 ACCURACY_DIR = PUBLIC_DATA / "accuracy"
+TRAJECTORY_DIR = PUBLIC_DATA / "trajectory"
 
+# Map raw attack-name suffixes to short codes used in the frontend
 ATTACK_MAP = {
     "a3fl": "a3fl",
-    "sin-adv": "doba",
     "sin-adv_DOBA": "doba",
+    "doba": "doba",
     "neurotoxin": "neurotoxin",
-    "reba": "reba",
     "modelreplace": "modelreplace",
+    "modelreplace_2": "modelreplace",
 }
 
+DEFENSE_METHODS = ["apra", "avg", "clip", "deepsight", "foolsgold", "rflbat"]
+
+
 def parse_dirname(dirname: str):
+    """Parse the new directory naming:
+    {dataset}_{epochs}_{date}_{time}_{method}_fix_True_{mia}_{mia_class}_{noise}_{attack}
+    """
     parts = dirname.split("_")
-    defense_methods = ["apra", "avg", "clip", "deepsight", "foolsgold", "rflbat"]
     defense = None
-    for dm in defense_methods:
+    for dm in DEFENSE_METHODS:
         if dm in parts:
             defense = dm
             dm_idx = parts.index(dm)
             break
-
     if defense is None:
         return None, None
 
-    remaining = "_".join(parts[dm_idx + 3:])
+    # Attack is parts[10:] — after dataset,epochs,date,time,method,fix,True,mia,mia_class,noise
+    attack_parts = parts[10:]
+    remaining = "_".join(attack_parts)
+
     attack = None
     for key, val in ATTACK_MAP.items():
         if remaining.startswith(key) or key in remaining:
             attack = val
             break
-
     return defense, attack
+
 
 def main():
     ACCURACY_DIR.mkdir(parents=True, exist_ok=True)
-
+    TRAJECTORY_DIR.mkdir(parents=True, exist_ok=True)
     summary = {}
 
     for entry in sorted(RESULT_DIR.iterdir()):
@@ -60,6 +68,7 @@ def main():
             print(f"SKIP (cannot parse): {entry.name}")
             continue
 
+        # ---- Accuracy CSV ----
         accuracy_files = list(entry.glob("*_accuracy.csv"))
         if not accuracy_files:
             print(f"SKIP (no accuracy CSV): {entry.name}")
@@ -69,39 +78,37 @@ def main():
         dst_name = f"{defense}_{attack}.csv"
         dst = ACCURACY_DIR / dst_name
         shutil.copy2(src, dst)
-        print(f"COPY {src.name} -> accuracy/{dst_name}")
+        print(f"COPY acc  {src.name} -> accuracy/{dst_name}")
 
+        # ---- Trajectory CSV ----
+        traj_files = list(entry.glob("*_trajectory.csv"))
+        if traj_files:
+            traj_dst = TRAJECTORY_DIR / dst_name
+            shutil.copy2(traj_files[0], traj_dst)
+            print(f"COPY traj {traj_files[0].name} -> trajectory/{dst_name}")
+
+        # Read last row for summary
         with open(src) as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             if rows:
                 last = rows[-1]
-                test_acc = float(last.get("main", last.get("test_acc", last.get("test acc", 0))))
-                bkd_acc = float(last.get("backdoor", last.get("bkd_acc", last.get("bkd acc", 0))))
+                test_acc = float(last.get("main", last.get("test_acc", last.get("test acc", 0)) or 0))
+                bkd_acc = float(last.get("backdoor", last.get("bkd_acc", last.get("bkd acc", 0)) or 0))
 
-        if defense not in summary:
-            summary[defense] = {}
-        summary[defense][attack] = {
+        summary.setdefault(defense, {})[attack] = {
             "asr": round(bkd_acc, 2),
             "accuracy": round(test_acc, 2),
         }
 
+    # Write summary.json
     summary_path = ACCURACY_DIR / "summary.json"
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     print(f"WROTE summary.json with {sum(len(v) for v in summary.values())} entries")
 
-    apra_dirs = [d for d in RESULT_DIR.iterdir() if d.is_dir() and "_apra_" in d.name]
-    if apra_dirs:
-        apra_dir = apra_dirs[0]
-        trace_files = list(apra_dir.glob("apra_client_trace.csv"))
-        round_files = list(apra_dir.glob("apra_round_summary.csv"))
-        if trace_files:
-            shutil.copy2(trace_files[0], PUBLIC_DATA / "apra_client_trace.csv")
-            print("COPY apra_client_trace.csv")
-        if round_files:
-            shutil.copy2(round_files[0], PUBLIC_DATA / "apra_round_summary.csv")
-            print("COPY apra_round_summary.csv")
+    print(f"Trajectory CSVs: {len(list(TRAJECTORY_DIR.glob('*.csv')))} files")
+
 
 if __name__ == "__main__":
     main()

@@ -48,13 +48,15 @@ export default function ClientMatrix({ roundSummary, clientTraces }: Props) {
                     style={{ backgroundColor: color }}
                   />
                 </TooltipTrigger>
-                <TooltipContent className="bg-white border border-[#E2E8F0] text-xs p-3 text-slate-800 shadow-sm">
-                  <p>Client #{trace.client_id}</p>
-                  <p>Role: {trace.role === "malicious" ? "Malicious" : "Benign"}</p>
-                  <p>Update Norm: {trace.update_norm?.toFixed(3) ?? "N/A"}</p>
-                  <p>MAD Z-Score: {trace.mad_z_score?.toFixed(2) ?? "N/A"}</p>
-                  <p>Trust Weight: {trace.trust_weight?.toFixed(3) ?? "N/A"}</p>
-                  <p>Status: {label}</p>
+                <TooltipContent className="bg-white border border-[#E2E8F0] text-xs p-3 text-slate-800 shadow-sm max-w-[200px]">
+                  <p className="font-bold mb-1">Client #{trace.client_id}</p>
+                  <p>角色: {trace.role === "adversary" ? "恶意" : "良性"}</p>
+                  {trace.trust_weight > 0 && <p>信任权重: {trace.trust_weight.toFixed(4)}</p>}
+                  {trace.clip_factor > 0 && <p>裁剪因子: {trace.clip_factor.toFixed(3)}</p>}
+                  <p>MAD: {trace.mad_pass ? "通过" : "拒绝"}</p>
+                  <p>聚类: {trace.cluster_pass ? `通过 (label ${trace.cluster_label})` : "拒绝"}</p>
+                  <p>最终: {trace.final_selected ? "选中" : "筛掉"}</p>
+                  <p className="mt-1 pt-1 border-t border-[#E2E8F0] font-medium">{label}</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

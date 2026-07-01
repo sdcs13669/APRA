@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { AttackMethod } from "../types";
+import { ATTACK_METHODS, ATTACK_LABELS } from "../types";
 import { useApraTrace } from "../hooks/useApraTrace";
 import { useAccuracyData } from "../hooks/useAccuracyData";
 import PlaybackControls from "../components/replay/PlaybackControls";
@@ -8,9 +10,13 @@ import AccuracyTrend from "../components/replay/AccuracyTrend";
 
 const SPEED_MAP: Record<number, number> = { 1: 500, 2: 250, 5: 100 };
 
+// Only attacks that have APRA trace data
+const AVAILABLE_ATTACKS: AttackMethod[] = ["a3fl", "doba", "neurotoxin", "modelreplace"];
+
 export default function ReplayPage() {
-  const { frames, loading, error } = useApraTrace();
-  const { data: accuracyData } = useAccuracyData("apra", "a3fl");
+  const [selectedAttack, setSelectedAttack] = useState<AttackMethod>("a3fl");
+  const { frames, loading, error } = useApraTrace(selectedAttack);
+  const { data: accuracyData } = useAccuracyData("apra", selectedAttack);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [currentRound, setCurrentRound] = useState(1);
@@ -65,8 +71,33 @@ export default function ReplayPage() {
     );
   }
 
+  // Reset round when switching attack
+  const handleAttackChange = (attack: AttackMethod) => {
+    setPlaying(false);
+    setCurrentRound(1);
+    setSelectedAttack(attack);
+  };
+
   return (
     <div className="pt-16" style={{ backgroundColor: "#F8FAFC", minHeight: "100vh" }}>
+      {/* Attack selector bar */}
+      <div className="sticky top-16 z-20 bg-white border-b border-[#E2E8F0] px-6 py-2 flex items-center gap-3">
+        <span className="text-xs text-slate-500">攻击类型:</span>
+        {AVAILABLE_ATTACKS.map((att) => (
+          <button
+            key={att}
+            onClick={() => handleAttackChange(att)}
+            className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+              selectedAttack === att
+                ? "bg-blue-600 text-white"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {ATTACK_LABELS[att]}
+          </button>
+        ))}
+      </div>
+
       <PlaybackControls
         playing={playing}
         currentRound={currentRound}

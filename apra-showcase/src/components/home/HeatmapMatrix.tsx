@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { useSummaryData } from "../../hooks/useSummaryData";
 import { DEFENSE_METHODS, ATTACK_METHODS, DEFENSE_LABELS, ATTACK_LABELS } from "../../types";
+import type { DefenseMethod } from "../../types";
 
 export default function HeatmapMatrix() {
   const { data, loading } = useSummaryData();
@@ -19,6 +20,21 @@ export default function HeatmapMatrix() {
   });
   const maxAsr = Math.max(...asrValues);
   const minAsr = Math.min(...asrValues);
+
+  // Find best defense per attack column
+  const bestPerAttack: Record<string, DefenseMethod> = {};
+  ATTACK_METHODS.forEach((attack) => {
+    let best: DefenseMethod | null = null;
+    let bestVal = Infinity;
+    DEFENSE_METHODS.forEach((defense) => {
+      const val = data[defense]?.[attack]?.asr;
+      if (val !== undefined && val < bestVal) {
+        bestVal = val;
+        best = defense;
+      }
+    });
+    if (best) bestPerAttack[attack] = best;
+  });
 
   function getColor(asr: number): string {
     const ratio = maxAsr === minAsr ? 0.5 : (asr - minAsr) / (maxAsr - minAsr);
@@ -61,6 +77,7 @@ export default function HeatmapMatrix() {
                 {ATTACK_METHODS.map((attack) => {
                   const result = data[defense]?.[attack];
                   const asr = result?.asr;
+                  const isBest = bestPerAttack[attack] === defense;
                   return (
                     <td key={attack} className="p-3 text-center">
                       {asr !== undefined ? (
@@ -68,14 +85,21 @@ export default function HeatmapMatrix() {
                           initial={{ scale: 0 }}
                           whileInView={{ scale: 1 }}
                           viewport={{ once: true }}
-                          className="inline-block w-full max-w-[100px] py-2 rounded text-xs font-bold cursor-default"
+                          className={`inline-block w-full max-w-[100px] py-2 rounded text-xs font-bold cursor-default relative ${
+                            isBest ? "ring-2 ring-amber-400 shadow-md shadow-amber-200/50" : ""
+                          }`}
                           style={{
                             backgroundColor: getColor(asr),
                             color: asr > 50 ? "#fff" : "#1E293B",
                           }}
-                          title={`${DEFENSE_LABELS[defense]} × ${ATTACK_LABELS[attack]}\nASR: ${asr}%\nAccuracy: ${result?.accuracy}%`}
+                          title={`${DEFENSE_LABELS[defense]} × ${ATTACK_LABELS[attack]}\nASR: ${asr}%\nAccuracy: ${result?.accuracy}%${isBest ? "\n⭐ 该攻击类型最优防御" : ""}`}
                         >
                           {asr}%
+                          {isBest && (
+                            <span className="absolute -top-1.5 -right-1.5 text-[10px] leading-none">
+                              👑
+                            </span>
+                          )}
                         </motion.div>
                       ) : (
                         <span className="text-slate-400">—</span>

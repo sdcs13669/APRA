@@ -7,6 +7,7 @@ interface Metric {
   suffix: string;
   detail: string;
   borderColor: string;
+  decimals?: number;
 }
 
 const metrics: Metric[] = [
@@ -19,10 +20,11 @@ const metrics: Metric[] = [
   },
   {
     label: "主任务精度",
-    value: 907,
-    suffix: "",
+    value: 90.7,
+    suffix: "%",
     detail: "90.7% 保持可用",
     borderColor: "#8B5CF6",
+    decimals: 1,
   },
   {
     label: "抵御攻击",
@@ -34,7 +36,7 @@ const metrics: Metric[] = [
 ];
 
 function MetricCard({ metric }: { metric: Metric }) {
-  const displayValue = useSpringNumber(metric.value);
+  const displayValue = useSpringNumber(metric.value, { decimals: metric.decimals });
 
   return (
     <motion.div

@@ -1,372 +1,229 @@
 #!/usr/bin/env python3
 """
-Generate synthetic APRA trace data for the replay page and dashboard charts.
+Convert REAL APRA trace data from agg_records/ into the CSV formats
+expected by the replay page.
+
+Reads ALL APRA experiments from the result directory and generates
+per-attack trace files.
 
 Outputs:
-  - public/data/apra_client_trace.csv   (~7000 rows, 10 clients x 700 rounds)
-  - public/data/apra_round_summary.csv  (~700 rows)
+  - public/data/apra_client_trace_{attack}.csv
+  - public/data/apra_round_summary_{attack}.csv
+  - public/data/apra_client_trace.csv  (default: first APRA experiment)
+  - public/data/apra_round_summary.csv (default: first APRA experiment)
 """
 
 import csv
 import json
-import math
-import random
-
+import shutil
+from collections import defaultdict
 from pathlib import Path
 
-random.seed(42)
+import yaml
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+RESULT_DIR = BASE_DIR.parent / "main" / "re_result_6-29_APRA"
 PUBLIC_DATA = BASE_DIR / "public" / "data"
-PUBLIC_DATA.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# Parameters
-# ---------------------------------------------------------------------------
-TOTAL_CLIENTS = 100
-SAMPLE_SIZE = 10
-NUM_ADVERSARIES = 5  # IDs 0..4
-TOTAL_ROUNDS = 700
-POISON_EPOCHS = 350  # first 350 rounds have adversary attacks
-
-K_INIT = 5.0
-K_DECAY = 0.1
-
-ADV_IDS = set(range(NUM_ADVERSARIES))
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+ATTACK_MAP = {
+    "a3fl": "a3fl",
+    "sin-adv_DOBA": "doba",
+    "neurotoxin": "neurotoxin",
+    "modelreplace": "modelreplace",
+    "modelreplace_2": "modelreplace",
+}
 
 
-def decaying_k(epoch: int) -> float:
-    return max(2.0, K_INIT * math.exp(-K_DECAY * epoch))
+def find_apra_dirs():
+    """Find ALL APRA experiment directories with their attack types."""
+    results = []
+    for d in sorted(RESULT_DIR.iterdir()):
+        if not d.is_dir() or "_apra_" not in d.name:
+            continue
+        parts = d.name.split("_")
+        attack_raw = "_".join(parts[10:])
+        attack = None
+        for key, val in ATTACK_MAP.items():
+            if attack_raw.startswith(key) or key in attack_raw:
+                attack = val
+                break
+        if attack:
+            results.append((d, attack))
+    return results
 
 
-def median(values):
-    s = sorted(values)
-    n = len(s)
-    if n == 0:
-        return 0.0
-    if n % 2 == 1:
-        return float(s[n // 2])
-    return (s[n // 2 - 1] + s[n // 2]) / 2.0
+def load_csv_rows(path):
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
 
 
-def mad(values):
-    med = median(values)
-    abs_devs = [abs(v - med) for v in values]
-    m = median(abs_devs)
-    return m * 1.4826 if m > 0 else 1e-9
+def parse_json(val, default=None):
+    if not val or val.strip() == "":
+        return default if default is not None else []
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else []
 
 
-def json_arr(ints):
-    return json.dumps(ints)
+def json_arr(arr):
+    return json.dumps(arr)
 
 
-def soft_mad_pass(z_score, k):
-    """Probabilistic MAD pass that models small-sample noise.
+def process_apra_experiment(apra_dir, attack):
+    """Process one APRA experiment and return (client_trace_rows, round_summary_rows)."""
+    params_path = apra_dir / "params.yaml.txt"
+    na = 5
+    if params_path.exists():
+        with open(params_path) as f:
+            params = yaml.safe_load(f)
+        na = params.get("num_adversaries", 5)
 
-    For a strict threshold this would be (abs(z) <= k).  We soften it so
-    that at the boundary there is a realistic chance of both outcomes,
-    which is what happens when MAD is estimated from only 10 samples.
-    """
-    # Effective threshold with ~15% random fluctuation
-    k_eff = k * random.uniform(0.85, 1.15)
-    return 1 if abs(z_score) <= k_eff else 0
+    rounds = load_csv_rows(apra_dir / "agg_records" / "agg_rounds.csv")
+    stages = load_csv_rows(apra_dir / "agg_records" / "agg_stages.csv")
 
+    stages_by_epoch = defaultdict(dict)
+    for s in stages:
+        epoch = int(float(s.get("epoch", 0)))
+        stage_name = s.get("stage", "")
+        sel = parse_json(s.get("selected", "[]"), [])
+        rej = parse_json(s.get("rejected", "[]"), [])
+        human = parse_json(s.get("human", ""), {})
+        stages_by_epoch[epoch][stage_name] = {
+            "selected": sel, "rejected": rej, "human": human,
+        }
 
-# ---------------------------------------------------------------------------
-# Generate data
-# ---------------------------------------------------------------------------
+    round_summary_rows = []
+    client_trace_rows = []
 
-client_trace_rows = []
-round_summary_rows = []
+    for r in rounds:
+        epoch = int(float(r.get("epoch", 0)))
+        participants = parse_json(r.get("initial_participants", "[]"), [])
+        final_sel = parse_json(r.get("final_selected", "[]"), [])
+        rejected = parse_json(r.get("rejected", "[]"), [])
+        num_sampled = len(participants)
 
-for epoch in range(1, TOTAL_ROUNDS + 1):
-    is_attack_epoch = epoch <= POISON_EPOCHS
+        epoch_stages = stages_by_epoch.get(epoch, {})
+        mad_stage = epoch_stages.get("apra_mad_filter", {})
+        cluster_stage = epoch_stages.get("apra_hierarchical_cluster", {})
+        clip_stage = epoch_stages.get("apra_trust_weighted_clip", {})
 
-    # 1. Sample 10 clients
-    sampled_ids = sorted(random.sample(range(TOTAL_CLIENTS), SAMPLE_SIZE))
+        mad_sel = mad_stage.get("selected", [])
+        mad_rej = mad_stage.get("rejected", [])
+        mad_hu = mad_stage.get("human", {})
 
-    # Adversarial IDs are only considered "malicious" during poison epochs
-    adversarial_in_sample = [
-        cid for cid in sampled_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-    benign_in_sample = [
-        cid for cid in sampled_ids if cid not in adversarial_in_sample
-    ]
-    num_adv_behavioral = len(adversarial_in_sample)
+        cluster_sel = cluster_stage.get("selected", [])
+        cluster_rej = cluster_stage.get("rejected", [])
+        cluster_hu = cluster_stage.get("human", {})
 
-    # 2. Build per-client data
-    clients = []
-    for cid in sampled_ids:
-        is_adv = cid in ADV_IDS and is_attack_epoch
+        clip_hu = clip_stage.get("human", {})
 
-        if is_adv:
-            # ~40% of adversaries keep norms moderately high to simulate
-            # stealthy attacks that partially evade detection
-            if random.random() < 0.40:
-                update_norm = random.uniform(1.5, 2.5)
-            else:
-                update_norm = random.uniform(2.5, 4.5)
-            trust_weight = random.uniform(0.01, 0.05)
-            clip_factor = random.uniform(0.2, 0.4)
-        else:
-            # Benign (or post-attack adversary): normal update range
-            update_norm = random.uniform(0.3, 1.8)
-            trust_weight = random.uniform(0.10, 0.15)
-            clip_factor = random.uniform(0.8, 1.0)
+        sampled_benign = [pid for pid in participants if pid >= na]
+        sampled_malicious = [pid for pid in participants if pid < na]
 
-        update_before = update_norm
-        update_after = update_norm * clip_factor
-        feature_norm = random.uniform(0.1, 0.5)
-        f0 = random.uniform(-0.5, 0.5)
-        f1 = random.uniform(-0.5, 0.5)
-        f2 = random.uniform(-0.5, 0.5)
+        mad_effective_pass = [pid for pid in mad_sel if pid in cluster_sel]
+        mad_effective_reject = [pid for pid in mad_sel if pid not in cluster_sel]
 
-        clients.append({
-            "client_id": cid,
-            "is_adversary": int(is_adv),
-            "update_norm": round(update_norm, 6),
-            "update_norm_before_clip": round(update_before, 6),
-            "update_norm_after_clip": round(update_after, 6),
-            "trust_weight": round(trust_weight, 6),
-            "clip_factor": round(clip_factor, 6),
-            "feature_norm": round(feature_norm, 6),
-            "feature_0": round(f0, 6),
-            "feature_1": round(f1, 6),
-            "feature_2": round(f2, 6),
+        cluster_effective_pass = [pid for pid in cluster_sel if pid in final_sel]
+        cluster_effective_reject = [pid for pid in cluster_sel if pid not in final_sel]
+
+        final_sel_benign = [pid for pid in final_sel if pid >= na]
+        final_sel_malicious = [pid for pid in final_sel if pid < na]
+        final_rej_benign = [pid for pid in rejected if pid >= na]
+        final_rej_malicious = [pid for pid in rejected if pid < na]
+
+        round_summary_rows.append({
+            "epoch": epoch, "num_sampled": num_sampled, "num_adversaries": na,
+            "sampled_ids": json_arr(participants),
+            "sampled_benign_ids": json_arr(sampled_benign),
+            "sampled_malicious_ids": json_arr(sampled_malicious),
+            "mad_median_norm": mad_hu.get("median_norm"),
+            "mad_mad": mad_hu.get("mad"),
+            "mad_k": mad_hu.get("k"),
+            "mad_safety_keep_used": int(mad_hu.get("safety_keep_used", False)),
+            "mad_fallback_used": int(mad_hu.get("fallback_used", False)),
+            "mad_pass_ids": json_arr(mad_sel),
+            "mad_reject_ids": json_arr(mad_rej),
+            "mad_effective_pass_ids": json_arr(mad_effective_pass),
+            "mad_effective_reject_ids": json_arr(mad_effective_reject),
+            "mad_pass_benign_ids": json_arr([pid for pid in mad_sel if pid >= na]),
+            "mad_pass_malicious_ids": json_arr([pid for pid in mad_sel if pid < na]),
+            "mad_reject_benign_ids": json_arr([pid for pid in mad_rej if pid >= na]),
+            "mad_reject_malicious_ids": json_arr([pid for pid in mad_rej if pid < na]),
+            "cluster_best_k": cluster_hu.get("best_k"),
+            "cluster_best_score": cluster_hu.get("best_score"),
+            "cluster_scores": json.dumps(cluster_hu.get("cluster_scores", {})),
+            "cluster_selected_cluster": cluster_hu.get("selected_cluster"),
+            "cluster_fallback_used": int(cluster_hu.get("fallback_used", False)),
+            "cluster_pass_ids": json_arr(cluster_sel),
+            "cluster_reject_ids": json_arr(cluster_rej),
+            "cluster_effective_pass_ids": json_arr(cluster_effective_pass),
+            "cluster_effective_reject_ids": json_arr(cluster_effective_reject),
+            "cluster_pass_benign_ids": json_arr([pid for pid in cluster_sel if pid >= na]),
+            "cluster_pass_malicious_ids": json_arr([pid for pid in cluster_sel if pid < na]),
+            "cluster_reject_benign_ids": json_arr([pid for pid in cluster_rej if pid >= na]),
+            "cluster_reject_malicious_ids": json_arr([pid for pid in cluster_rej if pid < na]),
+            "final_selected_ids": json_arr(final_sel),
+            "final_rejected_ids": json_arr(rejected),
+            "final_selected_benign_ids": json_arr(final_sel_benign),
+            "final_selected_malicious_ids": json_arr(final_sel_malicious),
+            "final_rejected_benign_ids": json_arr(final_rej_benign),
+            "final_rejected_malicious_ids": json_arr(final_rej_malicious),
+            "final_selected_benign_count": len(final_sel_benign),
+            "final_selected_malicious_count": len(final_sel_malicious),
+            "final_rejected_benign_count": len(final_rej_benign),
+            "final_rejected_malicious_count": len(final_rej_malicious),
         })
 
-    norms = [c["update_norm"] for c in clients]
-    med_norm = median(norms)
-    mad_val = mad(norms)
-    k = decaying_k(epoch)
+        # ---- Client trace rows ----
+        all_client_ids = set(participants)
+        for stg in [mad_sel, mad_rej, cluster_sel, cluster_rej]:
+            all_client_ids.update(stg)
 
-    # 3. MAD z-scores
-    for c in clients:
-        c["mad_z_score"] = round(
-            (c["update_norm"] - med_norm) / mad_val, 6
-        ) if mad_val > 0 else 0.0
+        trust_weights = clip_hu.get("trust_weights", {})
+        base_clip = clip_hu.get("base_clip", 1.0)
+        cluster_scores_dict = cluster_hu.get("cluster_scores", {})
+        selected_cluster = cluster_hu.get("selected_cluster", 0)
 
-    # 4. MAD pass / reject (soft threshold with noise)
-    mad_pass_ids = []
-    mad_reject_ids = []
-    for c in clients:
-        c["mad_pass"] = soft_mad_pass(c["mad_z_score"], k)
-        if c["mad_pass"]:
-            mad_pass_ids.append(c["client_id"])
-        else:
-            mad_reject_ids.append(c["client_id"])
+        for cid in sorted(all_client_ids):
+            is_adv = 1 if cid < na else 0
+            in_sample = cid in participants
 
-    # Safety-keep: if too few pass, force-keep the best ones
-    min_keep = max(2, SAMPLE_SIZE // 2)
-    mad_safety_keep = False
-    if len(mad_pass_ids) < min_keep:
-        mad_safety_keep = True
-        sorted_clients = sorted(clients, key=lambda x: abs(x["mad_z_score"]))
-        kept = set(c["client_id"] for c in sorted_clients[:min_keep])
-        mad_pass_ids = [cid for cid in sampled_ids if cid in kept]
-        mad_reject_ids = [cid for cid in sampled_ids if cid not in kept]
-        for c in clients:
-            c["mad_pass"] = 1 if c["client_id"] in kept else 0
+            mad_pass = 1 if cid in mad_sel else 0
+            mad_eff = 1 if cid in mad_effective_pass else 0
+            cluster_pass = 1 if cid in cluster_sel else 0
+            cluster_eff = 1 if cid in cluster_effective_pass else 0
+            final_sel_flag = 1 if cid in final_sel else 0
 
-    # MAD effective pass (stricter)
-    mad_effective_pass_ids = []
-    mad_effective_reject_ids = []
-    for c in clients:
-        if c["mad_pass"] == 1 and abs(c["mad_z_score"]) <= k * 0.8:
-            c["mad_effective_pass"] = 1
-            mad_effective_pass_ids.append(c["client_id"])
-        else:
-            c["mad_effective_pass"] = 0
-            if c["mad_pass"] == 1:
-                mad_effective_reject_ids.append(c["client_id"])
-
-    mad_pass_benign = [
-        cid for cid in mad_pass_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    mad_pass_malicious = [
-        cid for cid in mad_pass_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-    mad_reject_benign = [
-        cid for cid in mad_reject_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    mad_reject_malicious = [
-        cid for cid in mad_reject_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-
-    # 5. Hierarchical clustering simulation
-    cluster_labels = {}
-    for c in clients:
-        if c["is_adversary"]:
-            # 55% chance the adversary is separated into a minority cluster
-            if random.random() < 0.55:
-                label = random.choice([1, 2])
+            if not in_sample:
+                cluster_label = -1
+            elif cluster_pass:
+                cluster_label = selected_cluster
             else:
-                label = 0  # blends in with the benign cluster
-        else:
-            label = 0
-        cluster_labels[c["client_id"]] = label
-        c["cluster_label"] = label
+                other_labels = [int(k) for k in cluster_scores_dict.keys() if int(k) != selected_cluster]
+                cluster_label = other_labels[0] if other_labels else -1
 
-    # The largest cluster is chosen as the "good" cluster
-    cluster_counts = {}
-    for c in clients:
-        lbl = cluster_labels[c["client_id"]]
-        cluster_counts[lbl] = cluster_counts.get(lbl, 0) + 1
-    selected_cluster = max(cluster_counts, key=cluster_counts.get)
+            tw = trust_weights.get(str(cid), 0.0)
+            clip_factor = base_clip if tw > 0 else 0.0
 
-    # Cluster scores (silhouette-like)
-    cluster_scores = {
-        str(k): round(random.uniform(0.3, 0.9), 4)
-        for k in cluster_counts
-    }
-    cluster_best_k = len(cluster_counts)
-    cluster_best_score = max(cluster_scores.values())
+            client_trace_rows.append({
+                "epoch": epoch, "client_id": cid,
+                "role": "adversary" if is_adv else "benign",
+                "is_adversary": is_adv, "update_norm": 0, "mad_z_score": 0,
+                "mad_pass": mad_pass, "mad_effective_pass": mad_eff,
+                "cluster_label": cluster_label, "selected_cluster": selected_cluster,
+                "cluster_pass": cluster_pass, "cluster_effective_pass": cluster_eff,
+                "final_selected": final_sel_flag,
+                "trust_weight": round(tw, 6) if isinstance(tw, (int, float)) else 0,
+                "clip_factor": round(clip_factor, 6),
+                "update_norm_before_clip": 0, "update_norm_after_clip": 0,
+                "feature_norm": 0, "feature_0": 0, "feature_1": 0, "feature_2": 0,
+            })
 
-    cluster_pass_ids = []
-    cluster_reject_ids = []
-    cluster_effective_pass_ids = []
-    cluster_effective_reject_ids = []
+    return client_trace_rows, round_summary_rows
 
-    for c in clients:
-        c["selected_cluster"] = selected_cluster
-        in_selected = 1 if cluster_labels[c["client_id"]] == selected_cluster else 0
-        c["cluster_pass"] = in_selected
-        if in_selected:
-            cluster_pass_ids.append(c["client_id"])
-        else:
-            cluster_reject_ids.append(c["client_id"])
-        if in_selected and random.random() < 0.9:
-            c["cluster_effective_pass"] = 1
-            cluster_effective_pass_ids.append(c["client_id"])
-        else:
-            c["cluster_effective_pass"] = 0
-            if in_selected:
-                cluster_effective_reject_ids.append(c["client_id"])
 
-    cluster_fallback = random.random() < 0.05
-
-    cluster_pass_benign = [
-        cid for cid in cluster_pass_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    cluster_pass_malicious = [
-        cid for cid in cluster_pass_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-    cluster_reject_benign = [
-        cid for cid in cluster_reject_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    cluster_reject_malicious = [
-        cid for cid in cluster_reject_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-
-    # 6. Final selection: intersection of MAD pass and cluster pass
-    final_selected_ids = sorted(set(mad_pass_ids) & set(cluster_pass_ids))
-    final_rejected_ids = sorted(set(sampled_ids) - set(final_selected_ids))
-
-    for c in clients:
-        c["final_selected"] = 1 if c["client_id"] in final_selected_ids else 0
-
-    final_selected_benign = [
-        cid for cid in final_selected_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    final_selected_malicious = [
-        cid for cid in final_selected_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-    final_rejected_benign = [
-        cid for cid in final_rejected_ids
-        if not (cid in ADV_IDS and is_attack_epoch)
-    ]
-    final_rejected_malicious = [
-        cid for cid in final_rejected_ids if cid in ADV_IDS and is_attack_epoch
-    ]
-
-    # 7. Write round summary
-    round_summary_rows.append({
-        "epoch": epoch,
-        "num_sampled": len(sampled_ids),
-        "num_adversaries": num_adv_behavioral,
-        "sampled_ids": json_arr(sampled_ids),
-        "sampled_benign_ids": json_arr(benign_in_sample),
-        "sampled_malicious_ids": json_arr(adversarial_in_sample),
-        "mad_median_norm": round(med_norm, 6),
-        "mad_mad": round(mad_val, 6),
-        "mad_k": round(k, 6),
-        "mad_safety_keep_used": int(mad_safety_keep),
-        "mad_fallback_used": 0,
-        "mad_pass_ids": json_arr(mad_pass_ids),
-        "mad_reject_ids": json_arr(mad_reject_ids),
-        "mad_effective_pass_ids": json_arr(mad_effective_pass_ids),
-        "mad_effective_reject_ids": json_arr(mad_effective_reject_ids),
-        "mad_pass_benign_ids": json_arr(mad_pass_benign),
-        "mad_pass_malicious_ids": json_arr(mad_pass_malicious),
-        "mad_reject_benign_ids": json_arr(mad_reject_benign),
-        "mad_reject_malicious_ids": json_arr(mad_reject_malicious),
-        "cluster_best_k": cluster_best_k,
-        "cluster_best_score": cluster_best_score,
-        "cluster_scores": json.dumps(cluster_scores),
-        "cluster_selected_cluster": selected_cluster,
-        "cluster_fallback_used": int(cluster_fallback),
-        "cluster_pass_ids": json_arr(cluster_pass_ids),
-        "cluster_reject_ids": json_arr(cluster_reject_ids),
-        "cluster_effective_pass_ids": json_arr(cluster_effective_pass_ids),
-        "cluster_effective_reject_ids": json_arr(cluster_effective_reject_ids),
-        "cluster_pass_benign_ids": json_arr(cluster_pass_benign),
-        "cluster_pass_malicious_ids": json_arr(cluster_pass_malicious),
-        "cluster_reject_benign_ids": json_arr(cluster_reject_benign),
-        "cluster_reject_malicious_ids": json_arr(cluster_reject_malicious),
-        "final_selected_ids": json_arr(final_selected_ids),
-        "final_rejected_ids": json_arr(final_rejected_ids),
-        "final_selected_benign_ids": json_arr(final_selected_benign),
-        "final_selected_malicious_ids": json_arr(final_selected_malicious),
-        "final_rejected_benign_ids": json_arr(final_rejected_benign),
-        "final_rejected_malicious_ids": json_arr(final_rejected_malicious),
-        "final_selected_benign_count": len(final_selected_benign),
-        "final_selected_malicious_count": len(final_selected_malicious),
-        "final_rejected_benign_count": len(final_rejected_benign),
-        "final_rejected_malicious_count": len(final_rejected_malicious),
-    })
-
-    # 8. Write per-client trace rows
-    for c in clients:
-        client_trace_rows.append({
-            "epoch": epoch,
-            "client_id": c["client_id"],
-            "role": "adversary" if c["is_adversary"] else "benign",
-            "is_adversary": c["is_adversary"],
-            "update_norm": c["update_norm"],
-            "mad_z_score": c["mad_z_score"],
-            "mad_pass": c["mad_pass"],
-            "mad_effective_pass": c["mad_effective_pass"],
-            "cluster_label": c["cluster_label"],
-            "selected_cluster": c["selected_cluster"],
-            "cluster_pass": c["cluster_pass"],
-            "cluster_effective_pass": c["cluster_effective_pass"],
-            "final_selected": c["final_selected"],
-            "trust_weight": c["trust_weight"],
-            "clip_factor": c["clip_factor"],
-            "update_norm_before_clip": c["update_norm_before_clip"],
-            "update_norm_after_clip": c["update_norm_after_clip"],
-            "feature_norm": c["feature_norm"],
-            "feature_0": c["feature_0"],
-            "feature_1": c["feature_1"],
-            "feature_2": c["feature_2"],
-        })
-
-# ---------------------------------------------------------------------------
-# Write CSVs
-# ---------------------------------------------------------------------------
-
-CLIENT_TRACE_FILE = PUBLIC_DATA / "apra_client_trace.csv"
-ROUND_SUMMARY_FILE = PUBLIC_DATA / "apra_round_summary.csv"
-
-client_fields = [
+CLIENT_FIELDS = [
     "epoch", "client_id", "role", "is_adversary", "update_norm",
     "mad_z_score", "mad_pass", "mad_effective_pass",
     "cluster_label", "selected_cluster", "cluster_pass", "cluster_effective_pass",
@@ -374,8 +231,7 @@ client_fields = [
     "update_norm_before_clip", "update_norm_after_clip",
     "feature_norm", "feature_0", "feature_1", "feature_2",
 ]
-
-round_fields = [
+ROUND_FIELDS = [
     "epoch", "num_sampled", "num_adversaries",
     "sampled_ids", "sampled_benign_ids", "sampled_malicious_ids",
     "mad_median_norm", "mad_mad", "mad_k",
@@ -397,16 +253,42 @@ round_fields = [
     "final_rejected_benign_count", "final_rejected_malicious_count",
 ]
 
-with open(CLIENT_TRACE_FILE, "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=client_fields)
-    writer.writeheader()
-    writer.writerows(client_trace_rows)
 
-with open(ROUND_SUMMARY_FILE, "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=round_fields)
-    writer.writeheader()
-    writer.writerows(round_summary_rows)
+def main():
+    PUBLIC_DATA.mkdir(parents=True, exist_ok=True)
 
-print(f"Wrote {len(client_trace_rows)} rows -> {CLIENT_TRACE_FILE}")
-print(f"Wrote {len(round_summary_rows)} rows -> {ROUND_SUMMARY_FILE}")
-print("Done.")
+    apra_dirs = find_apra_dirs()
+    if not apra_dirs:
+        print("ERROR: No APRA experiments found in", RESULT_DIR)
+        return
+
+    first_attack = None
+
+    for apra_dir, attack in apra_dirs:
+        print(f"Processing APRA / {attack}: {apra_dir.name}")
+        client_rows, round_rows = process_apra_experiment(apra_dir, attack)
+
+        # Per-attack files
+        ct_file = PUBLIC_DATA / f"apra_client_trace_{attack}.csv"
+        rs_file = PUBLIC_DATA / f"apra_round_summary_{attack}.csv"
+        with open(ct_file, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=CLIENT_FIELDS)
+            w.writeheader(); w.writerows(client_rows)
+        with open(rs_file, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=ROUND_FIELDS)
+            w.writeheader(); w.writerows(round_rows)
+        print(f"  -> {ct_file.name} ({len(client_rows)} rows)")
+        print(f"  -> {rs_file.name} ({len(round_rows)} rows)")
+
+        # Keep first experiment as default
+        if first_attack is None:
+            first_attack = attack
+            shutil.copy2(ct_file, PUBLIC_DATA / "apra_client_trace.csv")
+            shutil.copy2(rs_file, PUBLIC_DATA / "apra_round_summary.csv")
+
+    print(f"\nDone — {len(apra_dirs)} APRA experiments processed.")
+    print(f"Default trace files: apra_client_trace.csv / apra_round_summary.csv ({first_attack})")
+
+
+if __name__ == "__main__":
+    main()
