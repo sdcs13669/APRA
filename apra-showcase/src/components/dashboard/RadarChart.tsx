@@ -8,7 +8,7 @@ import {
   Legend,
 } from "recharts";
 import { useSummaryData } from "../../hooks/useSummaryData";
-import type { AttackMethod } from "../../types";
+import type { AttackMethod, DatasetType } from "../../types";
 import { DEFENSE_METHODS, DEFENSE_LABELS } from "../../types";
 
 const CHART_COLORS: Record<string, string> = {
@@ -22,10 +22,11 @@ const CHART_COLORS: Record<string, string> = {
 
 interface Props {
   attack: AttackMethod;
+  dataset: DatasetType;
 }
 
-export default function RadarChart({ attack }: Props) {
-  const { data: summary } = useSummaryData();
+export default function RadarChart({ attack, dataset }: Props) {
+  const { data: summary } = useSummaryData(dataset);
 
   if (!summary) return null;
 

@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import type { DefenseMethod, AttackMethod } from "../types";
+import type { DefenseMethod, AttackMethod, DatasetType } from "../../types";
 import { useTrajectoryData } from "../../hooks/useTrajectoryData";
 import { ATTACK_METHODS, ATTACK_LABELS } from "../../types";
 
 interface Props {
   selectedDefense: DefenseMethod;
   selectedAttack: AttackMethod;
+  dataset: DatasetType;
 }
 
-export default function TrajectoryChart({ selectedDefense, selectedAttack }: Props) {
-  const { data, loading, error } = useTrajectoryData(selectedDefense, selectedAttack);
+export default function TrajectoryChart({ selectedDefense, selectedAttack, dataset }: Props) {
+  const { data, loading, error } = useTrajectoryData(selectedDefense, selectedAttack, dataset);
 
   if (loading) {
     return (

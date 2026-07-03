@@ -1,9 +1,15 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useApraTrace } from "../../hooks/useApraTrace";
 import { useMemo } from "react";
+import type { AttackMethod, DatasetType } from "../../types";
 
-export default function FilterStatsChart() {
-  const { frames } = useApraTrace();
+interface Props {
+  attack: AttackMethod;
+  dataset: DatasetType;
+}
+
+export default function FilterStatsChart({ attack, dataset }: Props) {
+  const { frames } = useApraTrace(attack, dataset);
 
   const chartData = useMemo(() => {
     return frames

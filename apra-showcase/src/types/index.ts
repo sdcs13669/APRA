@@ -1,8 +1,15 @@
 export type DefenseMethod = "apra" | "avg" | "clip" | "deepsight" | "foolsgold" | "rflbat";
 export type AttackMethod = "a3fl" | "doba" | "neurotoxin" | "reba" | "modelreplace";
+export type DatasetType = "cifar10" | "cifar100";
 
 export const DEFENSE_METHODS: DefenseMethod[] = ["apra", "avg", "clip", "deepsight", "foolsgold", "rflbat"];
-export const ATTACK_METHODS: AttackMethod[] = ["a3fl", "doba", "neurotoxin", "reba"];
+export const ATTACK_METHODS: AttackMethod[] = ["a3fl", "doba", "neurotoxin", "reba", "modelreplace"];
+export const DATASETS: DatasetType[] = ["cifar10", "cifar100"];
+
+export const DATASET_LABELS: Record<DatasetType, string> = {
+  cifar10: "CIFAR-10",
+  cifar100: "CIFAR-100",
+};
 
 export const DEFENSE_LABELS: Record<DefenseMethod, string> = {
   apra: "APRA",

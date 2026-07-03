@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { DefenseMethod, AttackMethod } from "../types";
+import type { DefenseMethod, AttackMethod, DatasetType } from "../types";
 import { getTrajectoryCsvPath } from "../lib/data-paths";
 import { parseCsv } from "../lib/csv";
 
@@ -11,14 +11,14 @@ interface TrajectoryRow {
   main: number;
 }
 
-export function useTrajectoryData(defense: DefenseMethod, attack: AttackMethod) {
+export function useTrajectoryData(defense: DefenseMethod, attack: AttackMethod, dataset: DatasetType) {
   const [data, setData] = useState<TrajectoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetch(getTrajectoryCsvPath(defense, attack))
+    fetch(getTrajectoryCsvPath(defense, attack, dataset))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.text();
@@ -39,7 +39,7 @@ export function useTrajectoryData(defense: DefenseMethod, attack: AttackMethod) 
         setError(err.message);
         setLoading(false);
       });
-  }, [defense, attack]);
+  }, [defense, attack, dataset]);
 
   return { data, loading, error };
 }

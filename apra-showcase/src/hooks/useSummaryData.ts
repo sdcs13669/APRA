@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
-import type { SummaryData } from "../types";
+import type { SummaryData, DatasetType } from "../types";
 import { getSummaryPath } from "../lib/data-paths";
 
-export function useSummaryData() {
+export function useSummaryData(dataset: DatasetType) {
   const [data, setData] = useState<SummaryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(getSummaryPath())
+    fetch(getSummaryPath(dataset))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -21,7 +21,7 @@ export function useSummaryData() {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [dataset]);
 
   return { data, loading, error };
 }

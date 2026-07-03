@@ -4,11 +4,11 @@ Convert REAL APRA trace data from agg_records/ into the CSV formats
 expected by the replay page.
 
 Reads ALL APRA experiments from the result directory and generates
-per-attack trace files.
+per-dataset per-attack trace files.
 
 Outputs:
-  - public/data/apra_client_trace_{attack}.csv
-  - public/data/apra_round_summary_{attack}.csv
+  - public/data/apra_client_trace_{dataset}_{attack}.csv
+  - public/data/apra_round_summary_{dataset}_{attack}.csv
   - public/data/apra_client_trace.csv  (default: first APRA experiment)
   - public/data/apra_round_summary.csv (default: first APRA experiment)
 """
@@ -28,27 +28,52 @@ PUBLIC_DATA = BASE_DIR / "public" / "data"
 ATTACK_MAP = {
     "a3fl": "a3fl",
     "sin-adv_DOBA": "doba",
+    "sin-adv": "doba",
     "neurotoxin": "neurotoxin",
     "modelreplace": "modelreplace",
     "modelreplace_2": "modelreplace",
+    "modelreplace_5": "modelreplace",
+    "reba": "reba",
 }
+
+DATASETS = ["cifar10", "cifar100"]
 
 
 def find_apra_dirs():
-    """Find ALL APRA experiment directories with their attack types."""
+    """Find ALL APRA experiment directories with their dataset and attack types."""
     results = []
     for d in sorted(RESULT_DIR.iterdir()):
         if not d.is_dir() or "_apra_" not in d.name:
             continue
-        parts = d.name.split("_")
-        attack_raw = "_".join(parts[10:])
-        attack = None
-        for key, val in ATTACK_MAP.items():
-            if attack_raw.startswith(key) or key in attack_raw:
-                attack = val
+
+        # Determine dataset
+        dataset = None
+        for ds in DATASETS:
+            if d.name.startswith(ds + "_"):
+                dataset = ds
                 break
+        if dataset is None:
+            continue
+
+        # Determine attack from dir name
+        parts = d.name.split("_")
+        attack = None
+        # Find attack after defense marker
+        dm_idx = None
+        for i, p in enumerate(parts):
+            if p == "apra":
+                dm_idx = i
+                break
+        if dm_idx is not None:
+            after_def = parts[dm_idx + 1:]
+            remaining = "_".join(after_def)
+            for key in sorted(ATTACK_MAP.keys(), key=len, reverse=True):
+                if key in remaining:
+                    attack = ATTACK_MAP[key]
+                    break
+
         if attack:
-            results.append((d, attack))
+            results.append((d, dataset, attack))
     return results
 
 
@@ -75,12 +100,22 @@ def process_apra_experiment(apra_dir, attack):
     params_path = apra_dir / "params.yaml.txt"
     na = 5
     if params_path.exists():
-        with open(params_path) as f:
-            params = yaml.safe_load(f)
-        na = params.get("num_adversaries", 5)
+        try:
+            with open(params_path) as f:
+                params = yaml.safe_load(f)
+        except Exception:
+            with open(params_path) as f:
+                params = yaml.full_load(f)
+        if params:
+            na = params.get("num_adversaries", 5)
 
-    rounds = load_csv_rows(apra_dir / "agg_records" / "agg_rounds.csv")
-    stages = load_csv_rows(apra_dir / "agg_records" / "agg_stages.csv")
+    rounds_path = apra_dir / "agg_records" / "agg_rounds.csv"
+    stages_path = apra_dir / "agg_records" / "agg_stages.csv"
+    if not rounds_path.exists() or not stages_path.exists():
+        return [], []
+
+    rounds = load_csv_rows(rounds_path)
+    stages = load_csv_rows(stages_path)
 
     stages_by_epoch = defaultdict(dict)
     for s in stages:
@@ -262,15 +297,20 @@ def main():
         print("ERROR: No APRA experiments found in", RESULT_DIR)
         return
 
+    first_dataset = None
     first_attack = None
 
-    for apra_dir, attack in apra_dirs:
-        print(f"Processing APRA / {attack}: {apra_dir.name}")
+    for apra_dir, dataset, attack in apra_dirs:
+        print(f"Processing APRA {dataset}/{attack}: {apra_dir.name}")
         client_rows, round_rows = process_apra_experiment(apra_dir, attack)
 
-        # Per-attack files
-        ct_file = PUBLIC_DATA / f"apra_client_trace_{attack}.csv"
-        rs_file = PUBLIC_DATA / f"apra_round_summary_{attack}.csv"
+        if not client_rows and not round_rows:
+            print(f"  SKIP (no agg_records data)")
+            continue
+
+        # Per-dataset per-attack files
+        ct_file = PUBLIC_DATA / f"apra_client_trace_{dataset}_{attack}.csv"
+        rs_file = PUBLIC_DATA / f"apra_round_summary_{dataset}_{attack}.csv"
         with open(ct_file, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=CLIENT_FIELDS)
             w.writeheader(); w.writerows(client_rows)
@@ -281,13 +321,20 @@ def main():
         print(f"  -> {rs_file.name} ({len(round_rows)} rows)")
 
         # Keep first experiment as default
-        if first_attack is None:
+        if first_dataset is None:
+            first_dataset = dataset
             first_attack = attack
             shutil.copy2(ct_file, PUBLIC_DATA / "apra_client_trace.csv")
             shutil.copy2(rs_file, PUBLIC_DATA / "apra_round_summary.csv")
 
+        # Also keep per-attack files for backward compatibility
+        ct_legacy = PUBLIC_DATA / f"apra_client_trace_{attack}.csv"
+        rs_legacy = PUBLIC_DATA / f"apra_round_summary_{attack}.csv"
+        shutil.copy2(ct_file, ct_legacy)
+        shutil.copy2(rs_file, rs_legacy)
+
     print(f"\nDone — {len(apra_dirs)} APRA experiments processed.")
-    print(f"Default trace files: apra_client_trace.csv / apra_round_summary.csv ({first_attack})")
+    print(f"Default trace files (dataset={first_dataset}, attack={first_attack})")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,16 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { useAccuracyData } from "../../hooks/useAccuracyData";
-import type { DefenseMethod, AttackMethod } from "../../types";
+import type { DefenseMethod, AttackMethod, DatasetType } from "../../types";
 import { DEFENSE_LABELS } from "../../types";
 
 interface Props {
   selectedDefense: DefenseMethod;
   selectedAttack: AttackMethod;
+  dataset: DatasetType;
 }
 
-export default function AccuracyChart({ selectedDefense, selectedAttack }: Props) {
-  const { data } = useAccuracyData(selectedDefense, selectedAttack);
+export default function AccuracyChart({ selectedDefense, selectedAttack, dataset }: Props) {
+  const { data } = useAccuracyData(selectedDefense, selectedAttack, dataset);
 
   const sampledData = data.filter((_, i) => i % 10 === 0 || i === data.length - 1);
 

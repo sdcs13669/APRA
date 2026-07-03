@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
-import type { AccuracyRow, DefenseMethod, AttackMethod } from "../types";
+import type { AccuracyRow, DefenseMethod, AttackMethod, DatasetType } from "../types";
 import { getAccuracyCsvPath } from "../lib/data-paths";
 import { parseCsv } from "../lib/csv";
 
-export function useAccuracyData(defense: DefenseMethod, attack: AttackMethod) {
+export function useAccuracyData(defense: DefenseMethod, attack: AttackMethod, dataset: DatasetType) {
   const [data, setData] = useState<AccuracyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetch(getAccuracyCsvPath(defense, attack))
+    fetch(getAccuracyCsvPath(defense, attack, dataset))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.text();
@@ -32,7 +32,7 @@ export function useAccuracyData(defense: DefenseMethod, attack: AttackMethod) {
         setError(err.message);
         setLoading(false);
       });
-  }, [defense, attack]);
+  }, [defense, attack, dataset]);
 
   return { data, loading, error };
 }
