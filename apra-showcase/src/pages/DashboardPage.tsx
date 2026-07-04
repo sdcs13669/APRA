@@ -5,6 +5,7 @@ import ControlBar from "../components/dashboard/ControlBar";
 import CombinedChart from "../components/dashboard/CombinedChart";
 import RadarChart from "../components/dashboard/RadarChart";
 import TrajectoryChart from "../components/dashboard/TrajectoryChart";
+import ComparisonPanel from "../components/dashboard/ComparisonPanel";
 
 export default function DashboardPage() {
   const [dataset, setDataset] = useState<DatasetType>("cifar10");
@@ -32,8 +33,9 @@ export default function DashboardPage() {
           <CombinedChart selectedDefense={defense} selectedAttack={attack} dataset={dataset} />
           <RadarChart attack={attack} dataset={dataset} />
         </div>
-        <div className="mt-6">
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TrajectoryChart selectedDefense={defense} selectedAttack={attack} dataset={dataset} />
+          <ComparisonPanel selectedAttack={attack} selectedDefense={defense} dataset={dataset} />
         </div>
       </div>
     </div>
