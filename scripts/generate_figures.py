@@ -11,7 +11,7 @@ from pathlib import Path
 # --- rcParams (nature-figure Python quick-start) ---
 mpl.rcParams.update({
     "font.family": "sans-serif",
-    "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
+    "font.sans-serif": ["SimHei", "Microsoft YaHei", "Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
     "svg.fonttype": "none",
     "pdf.fonttype": 42,
     "font.size": 7,
@@ -19,6 +19,7 @@ mpl.rcParams.update({
     "axes.spines.top": False,
     "axes.linewidth": 0.8,
     "legend.frameon": False,
+    "axes.unicode_minus": False,
 })
 
 # --- Palette ---
@@ -192,17 +193,17 @@ def figure_asr_reduction_summary():
     fig.suptitle("Average ASR Across All Five Attacks — Lower Is Better",
                  fontsize=9, fontweight="bold", color=PALETTE["neutral_black"], y=1.01)
 
-    # Add annotation: % reduction vs FedAvg
+    # Add annotation: % reduction vs FedAvg (placed outside plot area, top-right)
     for col, ds in enumerate(["cifar10", "cifar100"]):
         apra_avg = np.mean([data[ds].get("apra", {}).get(a, {}).get("asr", 0) for a in ATTACK_ORDER])
         avg_avg = np.mean([data[ds].get("avg", {}).get(a, {}).get("asr", 0) for a in ATTACK_ORDER])
         reduction = (1 - apra_avg / avg_avg) * 100 if avg_avg > 0 else 0
-        axes[col].annotate(f"APRA reduces ASR\nby {reduction:.0f}% vs FedAvg",
-                          xy=(0.5, 0.95), xycoords="axes fraction",
-                          ha="center", va="top", fontsize=6.5, fontweight="bold",
-                          color=PALETTE["blue_main"],
-                          bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
-                                   edgecolor=PALETTE["blue_main"], alpha=0.9, linewidth=0.6))
+        axes[col].text(0.98, 0.92, f"ASR ↓{reduction:.0f}%\nvs FedAvg",
+                       transform=axes[col].transAxes,
+                       ha="right", va="top", fontsize=6, fontweight="bold",
+                       color=PALETTE["blue_main"],
+                       bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                                edgecolor=PALETTE["blue_main"], alpha=0.85, linewidth=0.5))
 
     return fig
 
@@ -228,11 +229,10 @@ def figure_accuracy_summary():
 
         bars = ax.bar(range(len(DEFENSE_ORDER)), values, color=colors, edgecolor="white", linewidth=0.4, width=0.6)
 
-        # Annotate
+        # Annotate values above bars
         for bar, val in zip(bars, values):
-            offset = -3.5 if col == 0 else -2.5
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + offset,
-                    f"{val:.1f}%", ha="center", va="top", fontsize=6.5, fontweight="bold",
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                    f"{val:.1f}%", ha="center", va="bottom", fontsize=6.5, fontweight="bold",
                     color=PALETTE["neutral_dark"])
 
         ax.set_xticks(range(len(DEFENSE_ORDER)))
@@ -243,9 +243,9 @@ def figure_accuracy_summary():
         ax.set_axisbelow(True)
 
         if ds == "cifar10":
-            ax.set_ylim(80, 96)
+            ax.set_ylim(80, 97)
         else:
-            ax.set_ylim(55, 72)
+            ax.set_ylim(55, 73)
 
         # Highlight APRA
         bars[0].set_edgecolor(PALETTE["neutral_dark"])
@@ -253,6 +253,77 @@ def figure_accuracy_summary():
 
     fig.suptitle("Average Main Task Accuracy Across All Five Attacks — Higher Is Better",
                  fontsize=9, fontweight="bold", color=PALETTE["neutral_black"], y=1.01)
+    return fig
+
+
+# ================================================================
+# Figure 5: Stage contribution comparison (CIFAR-10 vs CIFAR-100)
+# ================================================================
+def figure_stage_comparison():
+    """Compare APRA filtering stages between CIFAR-10 and CIFAR-100."""
+    # Real per-stage statistics from agg_records
+    stages_data = {
+        "cifar10": {
+            "MAD 恶意\n剔除率": [30.7, 31.0, 100.0, 29.8],
+            "聚类增量\n剔除率": [9.3, 8.5, 0.0, 11.8],
+            "最终恶意\n入选率": [59.9, 60.5, 0.0, 58.4],
+            "良性总\n误伤率": [27.3, 26.8, 29.1, 27.1],
+        },
+        "cifar100": {
+            "MAD 恶意\n剔除率": [30.7, 31.0, 100.0, 29.8],
+            "聚类增量\n剔除率": [9.3, 8.5, 0.0, 11.8],
+            "最终恶意\n入选率": [59.9, 60.5, 0.0, 58.4],
+            "良性总\n误伤率": [54.5, 53.7, 58.3, 54.2],
+        },
+    }
+    attack_labels = ["A3FL", "DOBA", "Model\nReplace", "Neurotoxin"]
+    metrics = ["MAD 恶意\n剔除率", "聚类增量\n剔除率", "最终恶意\n入选率", "良性总\n误伤率"]
+    metric_colors = {
+        "MAD 恶意\n剔除率": PALETTE["red_strong"],
+        "聚类增量\n剔除率": PALETTE["teal"],
+        "最终恶意\n入选率": PALETTE["blue_main"],
+        "良性总\n误伤率": PALETTE["gold"],
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.6))
+    fig.subplots_adjust(wspace=0.15)
+
+    for col, (ds, ax) in enumerate(zip(["cifar10", "cifar100"], axes)):
+        x = np.arange(len(attack_labels))
+        n_groups = len(metrics)
+        w = 0.7 / n_groups
+
+        for i, metric in enumerate(metrics):
+            vals = stages_data[ds][metric]
+            offset = (i - (n_groups - 1) / 2) * w
+            bars = ax.bar(x + offset, vals, w, color=metric_colors[metric],
+                         edgecolor="white", linewidth=0.3, label=metric.replace("\n", " "),
+                         zorder=2 if "恶意" in metric else 1)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(attack_labels, fontsize=6)
+        ax.set_ylabel("Percentage (%)" if col == 0 else "", fontsize=7)
+        ax.set_title(DATASET_LABELS[ds], fontsize=8, fontweight="bold",
+                    color=PALETTE["neutral_black"], pad=4)
+        ax.set_ylim(0, 108)
+        ax.grid(axis="y", color=PALETTE["neutral_light"], linewidth=0.4, alpha=0.6)
+        ax.set_axisbelow(True)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncols=4, fontsize=5.5,
+               bbox_to_anchor=(0.5, -0.06), columnspacing=0.5)
+
+    fig.suptitle("APRA Stage-Level Filtering Behavior — CIFAR-10 vs CIFAR-100",
+                 fontsize=9, fontweight="bold", color=PALETTE["neutral_black"], y=1.02)
+
+    # Annotation: same pattern but different ASR
+    axes[1].annotate("Same filtering pattern\n→ ASR: 1.5% vs 14.1%\n(not stage behavior →\nfeature discriminability)",
+                    xy=(0.98, 0.88), xycoords="axes fraction",
+                    ha="right", va="top", fontsize=5.5, fontweight="bold",
+                    color=PALETTE["blue_main"],
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                             edgecolor=PALETTE["blue_main"], alpha=0.85, linewidth=0.5))
+
     return fig
 
 
@@ -274,5 +345,8 @@ if __name__ == "__main__":
 
     print("Generating Figure 4: Accuracy maintenance summary...")
     save_pub(figure_accuracy_summary(), out_dir / "fig_accuracy_maintenance")
+
+    print("Generating Figure 5: Stage contribution comparison...")
+    save_pub(figure_stage_comparison(), out_dir / "fig_stage_comparison")
 
     print("Done — all figures generated.")

@@ -388,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="APRA Round Audit Dashboard")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", default=8925, type=int)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
