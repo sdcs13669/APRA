@@ -35,7 +35,7 @@ export default function DashboardPage() {
         </div>
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TrajectoryChart selectedDefense={defense} selectedAttack={attack} dataset={dataset} />
-          <ComparisonPanel selectedAttack={attack} selectedDefense={defense} dataset={dataset} />
+          <ComparisonPanel selectedAttack={attack} dataset={dataset} />
         </div>
       </div>
     </div>

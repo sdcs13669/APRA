@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import type { DefenseMethod, AttackMethod, DatasetType } from "../types";
-import { DEFENSE_METHODS, ATTACK_METHODS } from "../types";
+import type { AttackMethod, DatasetType } from "../types";
+import { DEFENSE_METHODS } from "../types";
 import { getAccuracyCsvPath } from "../lib/data-paths";
 import { parseCsv } from "../lib/csv";
 
 export type ComparisonMode =
   | { type: "accuracy"; attack: AttackMethod }
-  | { type: "asr"; defense: DefenseMethod };
+  | { type: "asr"; attack: AttackMethod };
 
 export interface MultiLinePoint {
   epoch: number;
@@ -20,28 +20,20 @@ export function useMultiAccuracyData(mode: ComparisonMode, dataset: DatasetType)
 
   useEffect(() => {
     let cancelled = false;
-    let combos: { defense: DefenseMethod; attack: AttackMethod; label: string }[];
+    const attack = mode.attack;
 
-    if (mode.type === "accuracy") {
-      combos = DEFENSE_METHODS.map((d) => ({
-        defense: d,
-        attack: mode.attack,
-        label: d,
-      }));
-    } else {
-      combos = ATTACK_METHODS.map((a) => ({
-        defense: mode.defense,
-        attack: a,
-        label: a,
-      }));
-    }
+    const combos = DEFENSE_METHODS.map((d) => ({
+      defense: d,
+      attack,
+      label: d,
+    }));
 
     setSeries(combos.map((c) => c.label));
     setLoading(true);
 
     Promise.all(
-      combos.map(({ defense, attack, label }) =>
-        fetch(getAccuracyCsvPath(defense, attack, dataset))
+      combos.map(({ defense, attack: atk, label }) =>
+        fetch(getAccuracyCsvPath(defense, atk, dataset))
           .then((res) => {
             if (!res.ok) return { label, rows: [] };
             return res.text().then((text) => ({ label, rows: parseCsv<Record<string, string>>(text) }));
@@ -75,7 +67,7 @@ export function useMultiAccuracyData(mode: ComparisonMode, dataset: DatasetType)
     return () => {
       cancelled = true;
     };
-  }, [mode.type, mode.type === "accuracy" ? mode.attack : mode.defense, dataset]);
+  }, [mode.type, mode.attack, dataset]);
 
   return { data, series, loading };
 }

@@ -2,8 +2,8 @@ import { useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { useMultiAccuracyData } from "../../hooks/useMultiAccuracyData";
 import type { ComparisonMode } from "../../hooks/useMultiAccuracyData";
-import type { AttackMethod, DefenseMethod, DatasetType } from "../../types";
-import { DEFENSE_METHODS, DEFENSE_LABELS, ATTACK_LABELS } from "../../types";
+import type { AttackMethod, DatasetType } from "../../types";
+import { ATTACK_METHODS, DEFENSE_LABELS, ATTACK_LABELS } from "../../types";
 
 const DEFENSE_COLORS: Record<string, string> = {
   apra: "#2563EB",
@@ -14,40 +14,30 @@ const DEFENSE_COLORS: Record<string, string> = {
   rflbat: "#EC4899",
 };
 
-const ATTACK_COLORS: Record<string, string> = {
-  a3fl: "#2563EB",
-  doba: "#DC2626",
-  neurotoxin: "#16A34A",
-  reba: "#F59E0B",
-  modelreplace: "#8B5CF6",
-};
-
 interface Props {
   selectedAttack: AttackMethod;
-  selectedDefense: DefenseMethod;
   dataset: DatasetType;
 }
 
-type TabId = "accuracy" | DefenseMethod;
+type TabId = "accuracy" | AttackMethod;
 
-export default function ComparisonPanel({ selectedAttack, selectedDefense, dataset }: Props) {
+export default function ComparisonPanel({ selectedAttack, dataset }: Props) {
   const [tab, setTab] = useState<TabId>("accuracy");
 
   const mode: ComparisonMode =
     tab === "accuracy"
       ? { type: "accuracy", attack: selectedAttack }
-      : { type: "asr", defense: tab as DefenseMethod };
+      : { type: "asr", attack: tab as AttackMethod };
 
   const { data, series, loading } = useMultiAccuracyData(mode, dataset);
 
   const sampled = data.filter((_, i) => i % 10 === 0 || i === data.length - 1);
 
-  const yDomain = tab === "accuracy" ? [0, 100] : [0, 100];
   const metricLabel = tab === "accuracy" ? "主任务准确率 (%)" : "ASR (%)";
-  const colorMap = tab === "accuracy" ? DEFENSE_COLORS : ATTACK_COLORS;
-  const labelMap = tab === "accuracy"
-    ? DEFENSE_LABELS as Record<string, string>
-    : ATTACK_LABELS as Record<string, string>;
+  const title =
+    tab === "accuracy"
+      ? `6 种防御 · ${ATTACK_LABELS[selectedAttack]}`
+      : `6 种防御 ASR · ${ATTACK_LABELS[tab as AttackMethod]}`;
 
   return (
     <div className="bg-white shadow-sm border border-[#E2E8F0] rounded-lg p-6">
@@ -71,17 +61,17 @@ export default function ComparisonPanel({ selectedAttack, selectedDefense, datas
           总准确率
         </button>
         <span className="text-slate-300 text-xs">|</span>
-        {DEFENSE_METHODS.map((d) => (
+        {ATTACK_METHODS.map((a) => (
           <button
-            key={d}
-            onClick={() => setTab(d)}
+            key={a}
+            onClick={() => setTab(a)}
             className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
-              tab === d
+              tab === a
                 ? "bg-blue-600 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            {DEFENSE_LABELS[d]} ASR
+            {ATTACK_LABELS[a]} ASR
           </button>
         ))}
       </div>
@@ -101,7 +91,7 @@ export default function ComparisonPanel({ selectedAttack, selectedDefense, datas
               label={{ value: "Epoch", position: "insideBottomRight", offset: -5, fill: "#64748B", fontSize: 12 }}
             />
             <YAxis
-              domain={yDomain}
+              domain={[0, 100]}
               stroke="#64748B"
               fontSize={12}
               tick={{ fill: "#64748B" }}
@@ -115,10 +105,10 @@ export default function ComparisonPanel({ selectedAttack, selectedDefense, datas
                 color: "#1E293B",
                 boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
               }}
-              formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, labelMap[name] ?? name]}
+              formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, DEFENSE_LABELS[name] ?? name]}
             />
             <Legend
-              formatter={(value: string) => labelMap[value] ?? value}
+              formatter={(value: string) => DEFENSE_LABELS[value] ?? value}
               wrapperStyle={{ fontSize: "12px" }}
             />
             {series.map((s) => (
@@ -127,7 +117,7 @@ export default function ComparisonPanel({ selectedAttack, selectedDefense, datas
                 type="monotone"
                 dataKey={s}
                 name={s}
-                stroke={colorMap[s] ?? "#94A3B8"}
+                stroke={DEFENSE_COLORS[s] ?? "#94A3B8"}
                 strokeWidth={2}
                 dot={false}
               />
