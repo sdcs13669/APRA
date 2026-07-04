@@ -4,7 +4,7 @@ import { useSummaryData } from "../hooks/useSummaryData";
 import ControlBar from "../components/dashboard/ControlBar";
 import CombinedChart from "../components/dashboard/CombinedChart";
 import RadarChart from "../components/dashboard/RadarChart";
-import TrajectoryChart from "../components/dashboard/TrajectoryChart";
+import AccuracyComparisonPanel from "../components/dashboard/AccuracyComparisonPanel";
 import ComparisonPanel from "../components/dashboard/ComparisonPanel";
 
 export default function DashboardPage() {
@@ -34,8 +34,8 @@ export default function DashboardPage() {
           <RadarChart attack={attack} dataset={dataset} />
         </div>
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TrajectoryChart selectedDefense={defense} selectedAttack={attack} dataset={dataset} />
-          <ComparisonPanel selectedAttack={attack} dataset={dataset} />
+          <AccuracyComparisonPanel dataset={dataset} />
+          <ComparisonPanel dataset={dataset} />
         </div>
       </div>
     </div>

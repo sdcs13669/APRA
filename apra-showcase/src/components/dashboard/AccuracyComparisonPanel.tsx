@@ -17,11 +17,11 @@ interface Props {
   dataset: DatasetType;
 }
 
-export default function ComparisonPanel({ dataset }: Props) {
+export default function AccuracyComparisonPanel({ dataset }: Props) {
   const [attack, setAttack] = useState<AttackMethod>("a3fl");
 
   const { data, series, loading } = useMultiAccuracyData(
-    { type: "asr", attack },
+    { type: "accuracy", attack },
     dataset,
   );
 
@@ -33,7 +33,7 @@ export default function ComparisonPanel({ dataset }: Props) {
         className="text-sm font-semibold text-slate-800 mb-3"
         style={{ fontFamily: "'Lexend', sans-serif" }}
       >
-        多方法对比 · ASR
+        多方法对比 · 准确率
       </h3>
 
       <div className="flex items-center gap-1.5 flex-wrap mb-4">
@@ -70,7 +70,7 @@ export default function ComparisonPanel({ dataset }: Props) {
               stroke="#64748B"
               fontSize={12}
               tick={{ fill: "#64748B" }}
-              label={{ value: "ASR (%)", angle: -90, position: "insideLeft", fill: "#64748B", fontSize: 12 }}
+              label={{ value: "主任务准确率 (%)", angle: -90, position: "insideLeft", fill: "#64748B", fontSize: 12 }}
             />
             <Tooltip
               contentStyle={{
